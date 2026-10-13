@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Naija Ads Web SDK — demo</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; color: #111; }
+  label { display: block; font-weight: 600; margin: 0.75rem 0 0.25rem; }
+  input, select { width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; }
+  button { margin: 0.5rem 0.5rem 0 0; padding: 0.6rem 1rem; border: 0; border-radius: 8px; background: #0a7d33; color: #fff; font-size: 1rem; cursor: pointer; }
+  button.secondary { background: #444; }
+  #slot { min-height: 60px; margin-top: 1rem; border: 1px dashed #bbb; border-radius: 6px; padding: 4px; }
+  #log { background: #f6f6f6; border-radius: 6px; padding: 0.75rem; font-family: monospace; font-size: 12px; white-space: pre-wrap; max-height: 260px; overflow: auto; }
+</style>
+</head>
+<body>
+<h1>Naija Ads Web SDK demo</h1>
+<p>Runs against a local backend (<code>http://localhost:8080</code>) in <strong>test mode</strong> by default. Start the backend first: <code>go run ./cmd/api</code> in naija-ads-backend.</p>
+
+<label>API base URL</label>
+<input id="baseUrl" value="http://localhost:8080" />
+<label>APP_ID (public)</label>
+<input id="appId" placeholder="paste the APP_ID from your dashboard" />
+<label>Placement IDs</label>
+<input id="plBanner" placeholder="banner placement id" />
+<input id="plInter" placeholder="interstitial placement id" style="margin-top:0.4rem" />
+<input id="plRew" placeholder="rewarded placement id" style="margin-top:0.4rem" />
+<label>Mode</label>
+<select id="mode"><option value="test" selected>test</option><option value="live">live</option></select>
+
+<div>
+  <button id="init">Initialize</button>
+  <button id="banner" class="secondary">Load banner</button>
+  <button id="inter" class="secondary">Show interstitial</button>
+  <button id="rew" class="secondary">Show rewarded</button>
+</div>
+
+<div id="slot"></div>
+<h3>Event log</h3>
+<div id="log"></div>
+
+<script src="../dist/index.global.js"></script>
+<script>
+  const log = (msg) => { const el = document.getElementById('log'); el.textContent = `[${new Date().toLocaleTimeString()}] ${msg}\n` + el.textContent; };
+  let ads = null;
+  const val = (id) => document.getElementById(id).value.trim();
+
+  document.getElementById('init').onclick = () => {
+    try {
+      ads = NaijaAds.initialize({ appId: val('appId'), baseUrl: val('baseUrl'), mode: val('mode') });
+      log(`initialized (mode=${val('mode')}, session=${ads.sessionId})`);
+    } catch (err) { log(`initialize failed: ${err.message}`); }
+  };
+  document.getElementById('banner').onclick = async () => {
+    if (!ads) return log('initialize first');
+    try {
+      const ad = await ads.loadBanner(val('plBanner'), { container: document.getElementById('slot'), refreshIntervalMs: 30000 });
+      ad.on('impression', () => log('banner impression attested'));
+      ad.on('click', () => log('banner clicked'));
+      ad.on('error', (e) => log(`banner error: ${e.code} — ${e.message}`));
+      log('banner loaded');
+    } catch (err) { log(`banner no-fill/error: ${err.code} (${err.reason ?? err.message})`); }
+  };
+  document.getElementById('inter').onclick = async () => {
+    if (!ads) return log('initialize first');
+    try {
+      const ad = await ads.loadInterstitial(val('plInter'));
+      ad.on('dismissed', () => log('interstitial dismissed'));
+      await ad.show();
+      log('interstitial shown');
+    } catch (err) { log(`interstitial no-fill/error: ${err.code} (${err.reason ?? err.message})`); }
+  };
+  document.getElementById('rew').onclick = async () => {
+    if (!ads) return log('initialize first');
+    try {
+      const ad = await ads.loadRewarded(val('plRew'));
+      const outcome = await ad.show();
+      if (outcome.status === 'confirmed') {
+        log(`reward confirmed${outcome.test ? ' (test mode — no token)' : ''}. Your GAME SERVER must verify the token via POST /v1/rewards/verify before granting.`);
+      } else {
+        log(`reward ${outcome.status}: ${outcome.reason ?? '—'}`);
+      }
+    } catch (err) { log(`rewarded no-fill/error: ${err.code} (${err.reason ?? err.message})`); }
+  };
+</script>
+</body>
+</html>

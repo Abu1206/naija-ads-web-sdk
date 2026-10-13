@@ -1,0 +1,13 @@
+# CODEOWNERS — naija-ads-web-sdk
+# Replace with real handles/teams as the team grows.
+
+*                                   @Abu1206
+
+/AGENTS.md                          @Abu1206
+/docs/adr/                          @Abu1206
+
+# Reward flow + render attestation invariants — backend liaison reviews these too
+/src/rewarded.ts                    @Abu1206
+/src/base.ts                        @Abu1206
+/src/client.ts                      @Abu1206
+/src/types.ts                       @Abu1206
