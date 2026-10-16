@@ -1,6 +1,6 @@
 # naija-ads-web-sdk
 
-Web SDK for **Naija Ads** — banner, interstitial and rewarded ads for web games and apps.
+Web SDK for **Naija Ads** — banner, interstitial, rewarded and audio ads for web games and apps.
 
 Build rules: [`AGENTS.md`](./AGENTS.md) · Team workflow: [`CONTRIBUTING.md`](./CONTRIBUTING.md) + [`docs/COLLABORATION.md`](./docs/COLLABORATION.md) · Decisions: [`docs/adr/`](./docs/adr/)
 
@@ -39,6 +39,10 @@ const banner = await ads.loadBanner('BANNER_PLACEMENT_ID', {
 banner.on('impression', () => console.log('attested'));
 banner.on('error', (e) => console.warn(e.code, e.message));
 
+// Audio (ADR 0019): MP3/AAC with a required companion banner; analytics-only
+const audio = await ads.loadAudio('AUDIO_PLACEMENT_ID', { container: document.getElementById('slot') });
+audio.on('completed', () => console.log('audio completed (no money effect)'));
+
 // Interstitial
 const inter = await ads.loadInterstitial('INTERSTITIAL_PLACEMENT_ID');
 await inter.show();              // full-screen overlay; 'dismissed' event on close
@@ -71,7 +75,8 @@ if (valid && first_redemption) grantReward(); // replays return first_redemption
 
 | SDK | Backend contract | Notes |
 | --- | ---------------- | ----- |
-| 0.1.x | naija-ads-backend `main` @ 2026-10 (ADRs 0004, 0010, 0012, 0014, 0019) | banner/interstitial/rewarded + test mode |
+| 0.2.x | naija-ads-backend `main` @ 2026-10 (ADRs 0004, 0010, 0012, 0014, 0019) | all four MVP formats: banner/interstitial/rewarded/audio + test mode |
+| 0.1.x | naija-ads-backend `main` @ 2026-10 (ADRs 0004, 0010, 0012, 0014) | banner/interstitial/rewarded + test mode |
 
 ## API
 
@@ -81,6 +86,7 @@ if (valid && first_redemption) grantReward(); // replays return first_redemption
 | `loadBanner(placementId, { container?, widthDp?, refreshIntervalMs? })` | `Promise<BannerAd>` | rejects `no_fill` with server `reason` |
 | `loadInterstitial(placementId)` | `Promise<InterstitialAd>` | `show()` renders a full-screen overlay |
 | `loadRewarded(placementId, { testVideoDurationMs? })` | `Promise<RewardedAd>` | `show()` → `Promise<RewardOutcome>` |
+| `loadAudio(placementId, { container?, testAudioDurationMs? })` | `Promise<AudioAd>` | inline card player; companion banner is the click surface |
 | `destroyAll()` | `void` | stops timers, removes overlays |
 
 Events on every ad: `impression`, `click`, `error` (+ `dismissed`, `rewarded` where relevant).
@@ -102,4 +108,4 @@ npm test            # vitest + jsdom, must pass
 npm run build       # ESM + IIFE + d.ts into dist/
 ```
 
-Status: 🚧 foundation (Phase 2). Audio format and framework wrappers are future ADRs — see `AGENTS.md §7`.
+Status: ✅ Phase 2 foundation complete — all four MVP formats. Framework wrappers are future ADRs — see `AGENTS.md §7`.

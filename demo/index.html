@@ -26,6 +26,7 @@
 <input id="plBanner" placeholder="banner placement id" />
 <input id="plInter" placeholder="interstitial placement id" style="margin-top:0.4rem" />
 <input id="plRew" placeholder="rewarded placement id" style="margin-top:0.4rem" />
+<input id="plAudio" placeholder="audio placement id" style="margin-top:0.4rem" />
 <label>Mode</label>
 <select id="mode"><option value="test" selected>test</option><option value="live">live</option></select>
 
@@ -34,6 +35,7 @@
   <button id="banner" class="secondary">Load banner</button>
   <button id="inter" class="secondary">Show interstitial</button>
   <button id="rew" class="secondary">Show rewarded</button>
+  <button id="audio" class="secondary">Load audio</button>
 </div>
 
 <div id="slot"></div>
@@ -82,6 +84,15 @@
         log(`reward ${outcome.status}: ${outcome.reason ?? '—'}`);
       }
     } catch (err) { log(`rewarded no-fill/error: ${err.code} (${err.reason ?? err.message})`); }
+  };
+  document.getElementById('audio').onclick = async () => {
+    if (!ads) return log('initialize first');
+    try {
+      const ad = await ads.loadAudio(val('plAudio'), { container: document.getElementById('slot') });
+      ad.on('completed', () => log('audio completed (analytics only, no money effect)'));
+      ad.on('error', (e) => log(`audio error: ${e.code} — ${e.message}`));
+      log('audio card rendered — press play');
+    } catch (err) { log(`audio no-fill/error: ${err.code} (${err.reason ?? err.message})`); }
   };
 </script>
 </body>

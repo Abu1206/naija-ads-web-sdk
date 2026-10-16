@@ -9,8 +9,8 @@
 The **web-first SDK** (backend ADR 0005) that game/app developers embed to monetize inventory:
 `NaijaAds.initialize` → `loadBanner / loadInterstitial / loadRewarded` → render → attest → report.
 
-Three MVP formats, banner first-class: **banner (fixed + adaptive), interstitial, rewarded**.
-Audio (`ADR 0019`) is backend-supported but deliberately NOT in this foundation — see `docs/adr/0001`.
+Four MVP formats, banner first-class: **banner (fixed + adaptive), interstitial, rewarded, audio**
+(audio carries a required companion banner; completion is analytics-only — backend ADR 0019, this repo's [`docs/adr/0002`](./docs/adr/0002-audio-ads.md)).
 
 ## 2. Tech rules (do not change without RFC)
 
@@ -58,6 +58,7 @@ src/
 ├── banner.ts         # fixed + adaptive (slot_width_dp), refresh ≥ 15s
 ├── interstitial.ts   # full-screen image/video; video progress analytics-only
 ├── rewarded.ts       # gated player; server-decided outcome; test-mode simulator
+├── audio.ts          # inline card player; required companion banner; analytics-only
 ├── session.ts        # per-page-session session_id (sessionStorage)
 └── uuid.ts           # event/session ids
 ```
@@ -73,6 +74,7 @@ Every PR includes/extends tests; CI (`typecheck`, `build`, `vitest run`) must be
 | `banner` | test-mode placeholder + attested impression (no token); live img render + `render_token`; click opens served `click_url` + click event; no-fill rejection; refresh re-requests (new impression); refresh < 15s rejected |
 | `interstitial` | overlay + dismiss; live video `video_started`/`video_completed` ordering |
 | `rewarded` | test-mode full flow (started → completed → confirmed, no token); live confirmed (token) / rejected (reason); **dismiss before completion claims nothing**; video error; autoplay-blocked unlock |
+| `audio` | test-mode card + started → completed; live companion banner render + render token; playback events; **pause before end claims no completion**; destroy mid-play cancels the simulator; no-fill rejection |
 | `index` | config validation; `mode` defaults to `test`; re-initialize tears down; `destroyAll` |
 
 Conventions: fake `fetch` via `vi.stubGlobal`; `setPaintTimeoutForTests` shortens paint waits in jsdom; never assert on wall-clock; every bug fix ships a failing-first regression test.
@@ -85,7 +87,7 @@ npm run build       # tsup, must emit ESM + IIFE + d.ts
 
 ## 7. What NOT to build (backend spec §27 + scope discipline)
 
-No audio format yet (planned follow-up ADR), no React/Vue wrappers in core, no ad caching beyond the server's `expires_in`, no header bidding, no viewability libraries, no consent/IDFA-style machinery (backend ADR 0016 — there is nothing to gate), no ML anything, no secondary adapters (Amazon/AdSense mediation). **Reject scope creep PRs.**
+No React/Vue wrappers in core, no ad caching beyond the server's `expires_in`, no header bidding, no viewability libraries, no consent/IDFA-style machinery (backend ADR 0016 — there is nothing to gate), no ML anything, no secondary adapters (Amazon/AdSense mediation). **Reject scope creep PRs.**
 
 ## 8. Versioning + compatibility
 

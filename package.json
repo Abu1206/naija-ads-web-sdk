@@ -1,6 +1,6 @@
 {
   "name": "naija-ads-web-sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Web SDK for the Naija Ads advertising network: banner, interstitial and rewarded ads for web games and apps.",
   "type": "module",
   "main": "./dist/index.js",
