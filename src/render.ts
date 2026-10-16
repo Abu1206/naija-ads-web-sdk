@@ -14,12 +14,20 @@ const CSS = `
 .naija-ads-close{position:absolute;top:12px;right:12px;z-index:2;width:36px;height:36px;border:0;border-radius:50%;background:rgba(255,255,255,.92);color:#111;font-size:18px;line-height:36px;cursor:pointer;padding:0}
 .naija-ads-close:disabled{opacity:.4;cursor:default}
 .naija-ads-media{max-width:96vw;max-height:92vh;display:block}
+.naija-ads-audio{display:flex;flex-direction:column;gap:8px;padding:10px;border:1px solid #e2e2e2;border-radius:8px;background:#fff;max-width:420px;font-family:system-ui,-apple-system,sans-serif}
+.naija-ads-companion{display:block;width:100%;height:auto;border-radius:6px;cursor:pointer}
+.naija-ads-audio-row{display:flex;align-items:center;gap:10px}
+.naija-ads-audio-btn{flex:0 0 auto;width:36px;height:36px;border:0;border-radius:50%;background:#0a7d33;color:#fff;font-size:13px;cursor:pointer;padding:0}
+.naija-ads-progress{position:relative;width:70%;height:8px;background:rgba(0,0,0,.15);border-radius:4px;overflow:hidden}
+.naija-ads-overlay .naija-ads-progress{background:rgba(255,255,255,.3)}
+.naija-ads-progress-grow{flex:1 1 auto}
+.naija-ads-progress-fill{position:absolute;inset:0;width:0%;background:#0a7d33;transition:width .1s linear}
+.naija-ads-overlay .naija-ads-progress-fill{background:#fff}
 .naija-ads-test{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;background:linear-gradient(135deg,#0a7d33,#12b34a);color:#fff;font-family:system-ui,-apple-system,sans-serif;text-align:center;border-radius:6px;box-sizing:border-box}
 .naija-ads-test-title{font-weight:700;font-size:14px;margin:0}
 .naija-ads-test-sub{font-size:11px;opacity:.85;margin:0}
 .naija-ads-test-full{width:min(92vw,480px);height:min(72vh,640px)}
-.naija-ads-progress{position:relative;width:70%;height:8px;background:rgba(255,255,255,.3);border-radius:4px;overflow:hidden}
-.naija-ads-progress-fill{position:absolute;inset:0;width:0%;background:#fff;transition:width .1s linear}
+.naija-ads-test-strip{width:100%;padding:10px;cursor:pointer}
 `;
 
 /** Injects the SDK stylesheet exactly once. */

@@ -12,6 +12,8 @@
  */
 import type { AdDeps } from './base';
 import type { BaseAd } from './base';
+import { AudioAd } from './audio';
+import type { AudioOptions } from './audio';
 import { BannerAd } from './banner';
 import type { BannerOptions } from './banner';
 import { ApiClient } from './client';
@@ -42,6 +44,7 @@ export type {
   RewardResult,
 } from './types';
 export type { BannerAd, BannerOptions } from './banner';
+export type { AudioAd, AudioOptions } from './audio';
 export type { InterstitialAd } from './interstitial';
 export type { RewardOutcome, RewardedAd, RewardedOptions } from './rewarded';
 
@@ -61,6 +64,7 @@ export interface NaijaAds {
   loadBanner(placementId: string, options?: BannerOptions): Promise<BannerAd>;
   loadInterstitial(placementId: string): Promise<InterstitialAd>;
   loadRewarded(placementId: string, options?: RewardedOptions): Promise<RewardedAd>;
+  loadAudio(placementId: string, options?: AudioOptions): Promise<AudioAd>;
   /** Tears down every ad created by this instance (timers, overlays, media). */
   destroyAll(): void;
 }
@@ -170,6 +174,24 @@ class Impl implements NaijaAds {
     const ad = new RewardedAd(deps, placementId, options);
     adRef = ad;
     this.ads.add(ad);
+    return ad;
+  }
+
+  async loadAudio(placementId: string, options: AudioOptions = {}): Promise<AudioAd> {
+    const response = await this.request(placementId, 'audio');
+    let adRef: AudioAd | undefined;
+    const deps: AdDeps = {
+      client: this.client,
+      sessionId: this.sessionId,
+      response,
+      onDestroy: () => {
+        if (adRef) this.ads.delete(adRef);
+      },
+    };
+    const ad = new AudioAd(deps, placementId, options);
+    adRef = ad;
+    this.ads.add(ad);
+    if (options.container) await ad.show(options.container);
     return ad;
   }
 
