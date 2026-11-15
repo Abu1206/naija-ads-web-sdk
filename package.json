@@ -1,7 +1,7 @@
 {
   "name": "naija-ads-web-sdk",
-  "version": "0.2.0",
-  "description": "Web SDK for the Naija Ads advertising network: banner, interstitial and rewarded ads for web games and apps.",
+  "version": "0.3.0",
+  "description": "Web SDK for Naija Ads: layout-safe banner, interstitial, rewarded and audio ads.",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -20,7 +20,8 @@
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepack": "npm run typecheck && npm test && npm run build"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
@@ -32,6 +33,9 @@
   "engines": {
     "node": ">=20"
   },
-  "private": true,
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "license": "UNLICENSED"
 }

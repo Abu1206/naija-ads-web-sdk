@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getInitialized, initialize } from './index';
 import type { RewardOutcome } from './rewarded';
 import { resetSessionId } from './session';
-import { setPaintTimeoutForTests } from './render';
+import { getRenderRootForTests, setGeometryChecksForTests, setPaintTimeoutForTests } from './render';
 
 async function until(check: () => boolean, timeoutMs = 1000): Promise<void> {
   const start = Date.now();
@@ -20,6 +20,14 @@ const flush = async (): Promise<void> => {
   await new Promise((resolve) => setTimeout(resolve, 0));
   await new Promise((resolve) => setTimeout(resolve, 0));
 };
+
+function rewardedRoot(): ShadowRoot {
+  const host = document.querySelector<HTMLElement>('[data-naija-ads="rewarded"]');
+  if (!host) throw new Error('rewarded host not found');
+  const root = getRenderRootForTests(host);
+  if (!root) throw new Error('rewarded shadow root not found');
+  return root;
+}
 
 function eventBodies(fetchMock: { mock: { calls: unknown[][] } }): Array<Record<string, unknown>> {
   return fetchMock.mock.calls
@@ -47,11 +55,14 @@ describe('RewardedAd', () => {
   beforeEach(() => {
     resetSessionId();
     setPaintTimeoutForTests(50); // jsdom has no media pipeline; skip the long fallback
+    setGeometryChecksForTests(false);
     document.body.innerHTML = '';
     vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
   });
 
   afterEach(() => {
+    try { getInitialized().destroyAll(); } catch {}
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -67,7 +78,7 @@ describe('RewardedAd', () => {
     expect(outcome).toEqual({ status: 'confirmed', impressionId: 'imp_1', test: true });
     expect(outcome.rewardToken).toBeUndefined(); // real tokens only exist in live mode
 
-    const types = eventBodies(fetchMock as never).map((b) => b.event_type);
+    const types = eventBodies(fetchMock as never).map((b) => b.event_type).filter((type) => type !== 'viewability');
     expect(types).toEqual(['impression', 'video_started', 'video_completed']);
     expect(document.querySelector('.naija-ads-overlay')).toBeNull();
   });
@@ -84,7 +95,7 @@ describe('RewardedAd', () => {
 
     const pending = ad.show();
     await flush();
-    const video = document.querySelector('.naija-ads-overlay video') as HTMLVideoElement;
+    const video = rewardedRoot().querySelector('video') as HTMLVideoElement;
     video.dispatchEvent(new Event('loadeddata'));
     await flush();
     video.dispatchEvent(new Event('playing'));
@@ -109,7 +120,7 @@ describe('RewardedAd', () => {
 
     const pending = ad.show();
     await flush();
-    const video = document.querySelector('.naija-ads-overlay video') as HTMLVideoElement;
+    const video = rewardedRoot().querySelector('video') as HTMLVideoElement;
     video.dispatchEvent(new Event('loadeddata'));
     video.dispatchEvent(new Event('ended'));
     const outcome = await pending;
@@ -127,8 +138,8 @@ describe('RewardedAd', () => {
     const pending = ad.show();
     await flush();
     await flush();
-    const close = document.querySelector('.naija-ads-close') as HTMLButtonElement;
-    expect(close.disabled).toBe(false); // unlocked when autoplay was blocked
+    const close = rewardedRoot().querySelector('.naija-close') as HTMLButtonElement;
+    expect(close.disabled).toBe(false); // exit is always available; early close earns nothing
     close.click();
 
     const outcome = await pending;
@@ -143,7 +154,7 @@ describe('RewardedAd', () => {
 
     const pending = ad.show();
     await flush();
-    (document.querySelector('.naija-ads-overlay video') as HTMLVideoElement).dispatchEvent(new Event('error'));
+    (rewardedRoot().querySelector('video') as HTMLVideoElement).dispatchEvent(new Event('error'));
     const outcome = await pending;
     expect(outcome).toMatchObject({ status: 'rejected', reason: 'video_error' });
   });

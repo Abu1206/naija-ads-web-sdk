@@ -1,23 +1,28 @@
 # naija-ads-web-sdk
 
-Web SDK for **Naija Ads** — banner, interstitial, rewarded and audio ads for web games and apps.
+Canonical web SDK for **Naija Ads**: banner, interstitial, rewarded and audio ads for web games/apps.
 
-Build rules: [`AGENTS.md`](./AGENTS.md) · Team workflow: [`CONTRIBUTING.md`](./CONTRIBUTING.md) + [`docs/COLLABORATION.md`](./docs/COLLABORATION.md) · Decisions: [`docs/adr/`](./docs/adr/)
+- Zero runtime dependencies; strict TypeScript; ESM + browser IIFE.
+- Closed Shadow DOM, visible sponsorship labels, keyboard controls and safe-area-aware full-screen UI.
+- Server-owned selection/reward logic; paint attestation and ordered, idempotent events.
+- Test mode uses the same event path and never bills or earns.
 
-- **Zero dependencies**, ~20 KB minified, TypeScript strict, ESM + `<script>` bundle.
-- Test mode renders built-in placeholder ads and exercises the identical event flow (`ADR 0004`).
-- Rewards are **server-decided**: the SDK hands you a `reward_token`; your backend verifies it.
+Build rules: [`AGENTS.md`](./AGENTS.md) · Decisions: [`docs/adr/`](./docs/adr/)
 
-## Install
+## Release status
+
+Version **0.3.0** is prepared for the npm/CDN release and backend OpenAPI **0.5.0**. The registry package is not live until the release owner runs the reviewed publish workflow. For a pilot build today:
 
 ```bash
-npm install naija-ads-web-sdk
+npm ci
+npm pack
+# install the generated naija-ads-web-sdk-0.3.0.tgz in the publisher app
 ```
 
-or drop the script tag:
+After publication:
 
-```html
-<script src="https://cdn.example.com/naija-ads/v0/index.global.js"></script>
+```bash
+npm install naija-ads-web-sdk@^0.3.0
 ```
 
 ## Quickstart
@@ -26,86 +31,91 @@ or drop the script tag:
 import { initialize } from 'naija-ads-web-sdk';
 
 const ads = initialize({
-  appId: 'YOUR_APP_ID',          // public — never a secret
+  appId: 'YOUR_APP_ID',
   baseUrl: 'https://api.naijaads.example',
-  mode: 'test',                  // default; 'live' needs an approved app
+  mode: 'test', // safe default; live requires approved inventory
 });
+```
 
-// Banner (adaptive: the SDK reports the container width, ADR 0012)
-const banner = await ads.loadBanner('BANNER_PLACEMENT_ID', {
-  container: document.getElementById('slot'),
-  refreshIntervalMs: 30_000,     // optional, ≥ 15s
+### Banner
+
+```html
+<!-- Reserve the expected height in CSS to prevent layout shift. -->
+<div id="footer-ad" style="min-height:90px"></div>
+```
+
+```ts
+const banner = await ads.loadBanner('PLACEMENT_ID', {
+  container: document.getElementById('footer-ad')!,
+  layout: 'anchored',
+  refreshIntervalMs: 60_000, // optional; visible time only, minimum 30s
 });
 banner.on('impression', () => console.log('attested'));
-banner.on('error', (e) => console.warn(e.code, e.message));
+banner.on('error', console.warn);
+```
 
-// Audio (ADR 0019): MP3/AAC with a required companion banner; analytics-only
-const audio = await ads.loadAudio('AUDIO_PLACEMENT_ID', { container: document.getElementById('slot') });
-audio.on('completed', () => console.log('audio completed (no money effect)'));
+The server chooses the widest allowed logical size that fits current slot width/height. `ResizeObserver` re-requests after layout/orientation changes. Static 2x/3x assets are downscaled to logical CSS dimensions for sharp screens; GIF remains 1x.
 
-// Interstitial
-const inter = await ads.loadInterstitial('INTERSTITIAL_PLACEMENT_ID');
-await inter.show();              // full-screen overlay; 'dismissed' event on close
+| Layout | Intended position | Logical sizes |
+| --- | --- | --- |
+| `anchored` | top/bottom strip | 320×50, 320×100, 468×60, 728×90, 970×90 |
+| `inline` | scrollable content rectangle | 300×250, 336×280 |
 
-// Rewarded — the server decides, the SDK reports
-const rewarded = await ads.loadRewarded('REWARDED_PLACEMENT_ID');
+The groups never mix: a 300×250 rectangle cannot unexpectedly replace a footer strip. If no size fits, loading rejects with `code: "no_fill"` and `reason: "no_size_fits"`.
+
+### Interstitial
+
+```ts
+const interstitial = await ads.loadInterstitial('PLACEMENT_ID');
+const result = await interstitial.show(); // resolves on dismiss/failure
+```
+
+Load before a natural break, then show between screens/levels. Media is contained (never cropped), the page behind is inert and scroll-locked, focus stays in the modal, and close remains reachable inside device safe areas.
+
+### Rewarded
+
+```ts
+const rewarded = await ads.loadRewarded('PLACEMENT_ID');
 const outcome = await rewarded.show();
-if (outcome.status === 'confirmed') {
-  // ⚠️ Send outcome.rewardToken to YOUR backend, which must verify it:
-  //    POST /v1/rewards/verify  (Authorization: Bearer <SDK secret>, server-to-server only)
-  //    { valid, first_redemption } — grant only when both are true (ADR 0010).
-  grantExtraLife();
+if (outcome.status === 'confirmed' && outcome.rewardToken) {
+  // Send to YOUR server. Never grant in the browser.
 }
 ```
 
-Game-server verification example (Node):
+Your server verifies `reward_token` with `POST /v1/rewards/verify` using its SDK secret. Closing early returns `dismissed` and grants nothing. The exit is always available; “non-skippable” means an early exit cannot earn the reward, not that the user is trapped.
 
-```js
-// NEVER embed the SDK secret in the browser. This runs on your server.
-const res = await fetch(baseUrl + '/v1/rewards/verify', {
-  method: 'POST',
-  headers: { Authorization: `Bearer ${process.env.NAIJA_SDK_SECRET}`, 'Content-Type': 'application/json' },
-  body: JSON.stringify({ reward_token: outcome.rewardToken }),
+### Audio
+
+```ts
+const audio = await ads.loadAudio('PLACEMENT_ID', {
+  container: document.getElementById('audio-slot')!,
 });
-const { valid, first_redemption } = await res.json();
-if (valid && first_redemption) grantReward(); // replays return first_redemption=false
 ```
 
-## Compatibility
+Audio is an inline, user-initiated player with 44px controls and a required companion banner. Completion is analytics-only.
 
-| SDK | Backend contract | Notes |
-| --- | ---------------- | ----- |
-| 0.2.x | naija-ads-backend `main` @ 2026-10 (ADRs 0004, 0010, 0012, 0014, 0019) | all four MVP formats: banner/interstitial/rewarded/audio + test mode |
-| 0.1.x | naija-ads-backend `main` @ 2026-10 (ADRs 0004, 0010, 0012, 0014) | banner/interstitial/rewarded + test mode |
+## Rendering and measurement guarantees
 
-## API
-
-| Member | Returns | Notes |
-| ------ | ------- | ----- |
-| `initialize({ appId, baseUrl, mode? })` | `NaijaAds` | validates config; re-init destroys previous ads |
-| `loadBanner(placementId, { container?, widthDp?, refreshIntervalMs? })` | `Promise<BannerAd>` | rejects `no_fill` with server `reason` |
-| `loadInterstitial(placementId)` | `Promise<InterstitialAd>` | `show()` renders a full-screen overlay |
-| `loadRewarded(placementId, { testVideoDurationMs? })` | `Promise<RewardedAd>` | `show()` → `Promise<RewardOutcome>` |
-| `loadAudio(placementId, { container?, testAudioDurationMs? })` | `Promise<AudioAd>` | inline card player; companion banner is the click surface |
-| `destroyAll()` | `void` | stops timers, removes overlays |
-
-Events on every ad: `impression`, `click`, `error` (+ `dismissed`, `rewarded` where relevant).
-Errors are `NaijaAdsError` with `code`, `reason?`, `retryAfterMs?` and a fix-it hint in `message`.
-
-## Demo
-
-```bash
-npm run build
-# serve demo/index.html, point baseUrl at your local backend (go run ./cmd/api)
-```
+- An impression is sent only after successful media decode/first frame, non-zero rendered geometry and two animation frames. Failure/timeout sends no impression.
+- Click/media events queue behind the accepted impression even when browser playback starts first.
+- Live ads show `Sponsored`; test ads show `Test ad`. Click surfaces work by keyboard.
+- Full-screen formats use `100dvh`, safe-area insets and `object-fit: contain` in portrait or landscape.
+- Banner refresh pauses below 50% visibility and while the document is hidden.
+- The SDK reports bounded visible fraction/duration observations; the backend applies MRC thresholds. Viewability never affects billing.
+- `expires_in` is checked before show. Every loaded full-screen ad is single-use.
 
 ## Development
 
 ```bash
-npm install
-npm run typecheck   # must pass
-npm test            # vitest + jsdom, must pass
-npm run build       # ESM + IIFE + d.ts into dist/
+npm run typecheck
+npm test
+npm run build
+npm pack --dry-run
 ```
 
-Status: ✅ Phase 2 foundation complete — all four MVP formats. Framework wrappers are future ADRs — see `AGENTS.md §7`.
+## Compatibility
+
+| SDK | Backend | Notes |
+| --- | --- | --- |
+| 0.3.x | OpenAPI 0.5.x / ADR 0022 | canonical four-format renderer, layout-safe sizing, high-DPI, viewability |
+| 0.2.x | pre-ADR-0022 | superseded pilot; do not deploy alongside the retired backend SDK |

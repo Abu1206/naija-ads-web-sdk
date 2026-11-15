@@ -15,11 +15,12 @@ import type { BaseAd } from './base';
 import { AudioAd } from './audio';
 import type { AudioOptions } from './audio';
 import { BannerAd } from './banner';
+import { validateBannerOptions } from './banner';
 import type { BannerOptions } from './banner';
 import { ApiClient } from './client';
 import { NaijaAdsError } from './errors';
 import { InterstitialAd } from './interstitial';
-import { measureWidthDp } from './render';
+import { detectDeviceType, measureWidthDp, slotHeightDp } from './render';
 import { RewardedAd } from './rewarded';
 import type { RewardedOptions } from './rewarded';
 import { getSessionId } from './session';
@@ -39,6 +40,7 @@ export type {
   AdResponse,
   AdType,
   Creative,
+  BannerLayout,
   DeviceType,
   EventAck,
   RewardResult,
@@ -124,8 +126,25 @@ class Impl implements NaijaAds {
   }
 
   async loadBanner(placementId: string, options: BannerOptions = {}): Promise<BannerAd> {
-    const slotWidthDp = options.widthDp ?? measureWidthDp(options.container);
-    const response = await this.request(placementId, 'banner', slotWidthDp, options.deviceType);
+    validateBannerOptions(options);
+    const requestFor = (slot: HTMLElement | null, layout = options.layout): Promise<AdResponse> => {
+      const width = options.widthDp ?? measureWidthDp(slot);
+      if (slot && width === undefined) {
+        return Promise.reject(new NaijaAdsError(
+          'invalid_config',
+          'The banner container has no measurable width. Render it in layout before calling loadBanner().',
+        ));
+      }
+      return this.request(
+        placementId,
+        'banner',
+        width,
+        width === undefined ? undefined : slotHeightDp(layout, slot, options.maxHeightDp),
+        options.deviceType ?? detectDeviceType(),
+      );
+    };
+    const response = await requestFor(options.container ?? null);
+    const resolvedLayout = response.bannerLayout ?? options.layout;
     let adRef: BannerAd | undefined;
     const deps: BannerDepsInternal = {
       client: this.client,
@@ -134,7 +153,7 @@ class Impl implements NaijaAds {
       onDestroy: () => {
         if (adRef) this.ads.delete(adRef);
       },
-      reload: () => this.request(placementId, 'banner', slotWidthDp, options.deviceType),
+      reload: (slot) => requestFor(slot, resolvedLayout),
     };
     const ad = new BannerAd(deps, placementId, options);
     adRef = ad;
@@ -204,13 +223,14 @@ class Impl implements NaijaAds {
     placementId: string,
     adType: AdType,
     slotWidthDp?: number,
+    slotHeightDp?: number,
     deviceType?: DeviceType,
   ): Promise<AdResponse> {
-    const response = await this.client.requestAd({ placementId, adType, sessionId: this.sessionId, slotWidthDp, deviceType });
+    const response = await this.client.requestAd({ placementId, adType, sessionId: this.sessionId, slotWidthDp, slotHeightDp, deviceType });
     if (!response.fill) throw noFillError(placementId, response);
     return response;
   }
 }
 
 /** Banner deps add a reload callback; structurally compatible with AdDeps. */
-type BannerDepsInternal = AdDeps & { reload: () => Promise<AdResponse> };
+type BannerDepsInternal = AdDeps & { reload: (slot: HTMLElement | null) => Promise<AdResponse> };
