@@ -13,8 +13,10 @@
 import type { ApiClient } from './client';
 import { NaijaAdsError } from './errors';
 import { openClickUrl } from './render';
-import type { AdResponse, Creative, EventWire } from './types';
+import type { AdResponse, Creative, EventAck, EventWire } from './types';
 import { uuid } from './uuid';
+import { ViewabilityTracker } from './viewability';
+import type { ViewabilityObservation } from './viewability';
 
 export type AdEventHandler = (payload: unknown) => void;
 
@@ -70,6 +72,11 @@ export abstract class BaseAd {
   protected expiresAt: number | null;
   protected destroyed = false;
   protected impressionAccepted = false;
+  private impressionPromise: Promise<void> | null = null;
+  private impressionGate!: Promise<boolean>;
+  private resolveImpressionGate!: (accepted: boolean) => void;
+  private impressionGateSettled = false;
+  private viewability: ViewabilityTracker | null = null;
 
   protected readonly onDestroy?: () => void;
 
@@ -88,10 +95,24 @@ export abstract class BaseAd {
     this.clickUrl = deps.response.clickUrl ?? null;
     this.renderToken = deps.response.renderToken ?? '';
     this.expiresAt = deps.response.expiresIn ? Date.now() + deps.response.expiresIn * 1000 : null;
+    this.resetImpressionGate();
   }
 
   on(event: string, handler: AdEventHandler): this {
     this.events.on(event, handler);
+    // loadBanner/loadAudio may render before the caller receives the ad object.
+    // Replay settled impression state so the documented post-load subscription
+    // is reliable rather than timing-dependent.
+    if (event === 'impression' && this.impressionAccepted) {
+      queueMicrotask(() => {
+        if (this.destroyed) return;
+        try {
+          handler({ impressionId: this.impressionId, replay: true });
+        } catch {
+          // Match Emitter: publisher callbacks never break SDK lifecycle.
+        }
+      });
+    }
     return this;
   }
 
@@ -116,6 +137,8 @@ export abstract class BaseAd {
     if (!response.impressionId) {
       throw new NaijaAdsError('unknown_error', 'Fill response did not include an impression_id.');
     }
+    this.finishViewability();
+    this.abandonImpression();
     this.impressionId = response.impressionId;
     this.size = response.bannerSize ?? null;
     this.creative = response.creative;
@@ -123,6 +146,8 @@ export abstract class BaseAd {
     this.renderToken = response.renderToken ?? '';
     this.expiresAt = response.expiresIn ? Date.now() + response.expiresIn * 1000 : null;
     this.impressionAccepted = false;
+    this.impressionPromise = null;
+    this.resetImpressionGate();
   }
 
   protected eventPayload(eventType: string): EventWire {
@@ -139,36 +164,116 @@ export abstract class BaseAd {
     return event;
   }
 
+  protected assertFresh(): void {
+    if (this.expiresAt !== null && Date.now() >= this.expiresAt) {
+      throw new NaijaAdsError('expired', 'This loaded ad expired before it was shown. Load a fresh ad.');
+    }
+  }
+
   /**
    * Sends the impression event. Must be called only after the creative
    * painted; live impressions carry the render token (ADR 0010). Not gated
    * on `destroyed`: once painted, the impression happened — a teardown that
    * races the attestation must never lose it.
    */
-  protected async sendImpression(): Promise<void> {
+  protected sendImpression(): Promise<void> {
+    if (this.impressionPromise) return this.impressionPromise;
+    this.impressionPromise = (async () => {
+      try {
+        const ack = await this.client.sendEvent(this.eventPayload('impression'));
+        if (!ack.accepted) {
+          throw new NaijaAdsError('unknown_error', 'The ad server did not accept the painted impression.');
+        }
+        this.impressionAccepted = true;
+        this.settleImpressionGate(true);
+        this.emit('impression', { impressionId: this.impressionId });
+      } catch (err) {
+        this.settleImpressionGate(false);
+        this.emit('error', err);
+        throw err;
+      }
+    })();
+    return this.impressionPromise;
+  }
+
+  /** Queues follow-up events behind the accepted impression (ADR 0010). */
+  protected async sendOrderedEvent(eventType: string): Promise<EventAck | undefined> {
+    if (this.destroyed && eventType !== 'viewability') return undefined;
     try {
-      const ack = await this.client.sendEvent(this.eventPayload('impression'));
-      if (ack.accepted) this.impressionAccepted = true;
-      this.emit('impression');
+      const accepted = await this.impressionGate;
+      if (!accepted || !this.impressionAccepted) return undefined;
+      return await this.client.sendEvent(this.eventPayload(eventType));
     } catch (err) {
       this.emit('error', err);
+      return undefined;
     }
   }
 
-  /** Fire-and-forget click; navigation happens in the user gesture, not here. */
+  /** Fire-and-forget click; navigation remains in the user gesture. */
   protected sendClick(): void {
-    if (this.destroyed || !this.impressionAccepted) return;
-    void this.client.sendEvent(this.eventPayload('click')).catch(() => {
-      // A dropped click event must not break the navigation that already happened.
-    });
+    void this.sendOrderedEvent('click');
   }
 
   /** Opens the served click URL exactly as returned by the server (ADR 0019). */
   protected handleClick(): void {
-    if (!this.clickUrl) return;
-    this.emit('click', { url: this.clickUrl });
+    if (this.destroyed || (!this.test && !this.clickUrl)) return;
+    this.emit('click', { url: this.clickUrl, test: this.test });
     this.sendClick();
-    openClickUrl(this.clickUrl);
+    if (this.clickUrl) openClickUrl(this.clickUrl);
+  }
+
+  protected startViewability(
+    target: HTMLElement,
+    creativeKind: string,
+    active?: () => boolean,
+    audible?: () => boolean | undefined,
+  ): void {
+    this.finishViewability();
+    this.viewability = new ViewabilityTracker({
+      target,
+      thresholdMs: creativeKind === 'video' ? 2_000 : 1_000,
+      active,
+      audible,
+      report: (observation) => this.sendViewability(observation),
+    });
+    this.viewability.start();
+  }
+
+  protected viewabilityStateChanged(): void {
+    this.viewability?.stateChanged();
+  }
+
+  protected finishViewability(): void {
+    this.viewability?.finish();
+    this.viewability = null;
+  }
+
+  /** Unblocks events that raced a dismissal or creative failure before paint. */
+  protected abandonImpression(): void {
+    this.settleImpressionGate(false);
+  }
+
+  private resetImpressionGate(): void {
+    this.impressionGateSettled = false;
+    this.impressionGate = new Promise<boolean>((resolve) => {
+      this.resolveImpressionGate = resolve;
+    });
+  }
+
+  private settleImpressionGate(accepted: boolean): void {
+    if (this.impressionGateSettled) return;
+    this.impressionGateSettled = true;
+    this.resolveImpressionGate(accepted);
+  }
+
+  private sendViewability(observation: ViewabilityObservation): void {
+    const event = this.eventPayload('viewability');
+    event.visible_fraction_bps = observation.visibleFractionBps;
+    event.continuous_visible_ms = observation.continuousVisibleMs;
+    if (observation.audible !== undefined) event.audible = observation.audible;
+    // The tracker only starts after impression acceptance; keepalive in the
+    // client lets pagehide observations finish without blocking navigation.
+    void this.client.sendEvent(event).catch((err: unknown) => this.emit('error', err));
   }
 
   abstract destroy(): void;

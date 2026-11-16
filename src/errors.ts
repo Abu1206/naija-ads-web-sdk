@@ -10,6 +10,8 @@ export type ErrorCode =
   | 'no_fill'
   | 'network'
   | 'destroyed'
+  | 'expired'
+  | 'creative_failed'
   // Backend codes, passed through
   | 'invalid_field'
   | 'unknown_placement'
@@ -50,6 +52,8 @@ export const HINTS: Partial<Record<ErrorCode, string>> = {
     'Too many requests for this IP/app/session/placement. Respect the retry delay before sending more.',
   retry: 'The ad server is briefly unavailable. Retry shortly with the same identifiers.',
   temporarily_unavailable: 'The ad server is temporarily unavailable. Retry shortly.',
+  expired: 'This loaded ad expired before it was shown. Load a fresh ad.',
+  creative_failed: 'The creative did not load and paint, so no impression was sent. Load a fresh ad.',
 };
 
 export interface NaijaAdsErrorOptions {

@@ -36,6 +36,7 @@ export interface RequestAdInput {
   adType: AdType;
   sessionId: string;
   slotWidthDp?: number;
+  slotHeightDp?: number;
   deviceType?: DeviceType;
 }
 
@@ -74,6 +75,7 @@ export class ApiClient {
       mode: this.mode,
       context: {
         ...(input.slotWidthDp !== undefined ? { slot_width_dp: input.slotWidthDp } : {}),
+        ...(input.slotHeightDp !== undefined ? { slot_height_dp: input.slotHeightDp } : {}),
         ...(input.deviceType !== undefined ? { device_type: input.deviceType } : {}),
       },
     };
@@ -104,6 +106,9 @@ export class ApiClient {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
+          credentials: 'omit',
+          referrerPolicy: 'no-referrer',
+          cache: 'no-store',
           ...(keepalive ? { keepalive: true } : {}),
         });
         if (res.status < 400) return res;

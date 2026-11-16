@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getInitialized, initialize, NaijaAdsError } from './index';
 import { resetSessionId } from './session';
+import { getRenderRootForTests, setGeometryChecksForTests, setPaintTimeoutForTests } from './render';
 
 function jsonResponse(status: number, payload: unknown): Response {
   return new Response(JSON.stringify(payload), { status, headers: { 'Content-Type': 'application/json' } });
@@ -21,6 +22,8 @@ function stubTestFill(): ReturnType<typeof vi.fn> {
 describe('initialize', () => {
   beforeEach(() => {
     resetSessionId();
+    setPaintTimeoutForTests(50);
+    setGeometryChecksForTests(false);
     document.body.innerHTML = '';
   });
 
@@ -40,7 +43,7 @@ describe('initialize', () => {
     initialize({ appId: 'app_1', baseUrl: 'http://api.test' });
     const container = document.createElement('div');
     document.body.appendChild(container);
-    await getInitialized().loadBanner('pl', { container });
+    await getInitialized().loadBanner('pl', { container, widthDp: 320 });
     const body = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body)) as Record<string, unknown>;
     expect(body.mode).toBe('test');
   });
@@ -50,11 +53,12 @@ describe('initialize', () => {
     const first = initialize({ appId: 'app_1', baseUrl: 'http://api.test' });
     const container = document.createElement('div');
     document.body.appendChild(container);
-    await first.loadBanner('pl', { container });
-    expect(container.querySelector('.naija-ads-test')).toBeTruthy();
+    await first.loadBanner('pl', { container, widthDp: 320 });
+    const host = container.querySelector<HTMLElement>('[data-naija-ads="banner"]')!;
+    expect(getRenderRootForTests(host)?.querySelector('.naija-test')).toBeTruthy();
 
     const second = initialize({ appId: 'app_1', baseUrl: 'http://api.test' });
-    expect(container.querySelector('.naija-ads-test')).toBeNull();
+    expect(container.querySelector('[data-naija-ads="banner"]')).toBeNull();
     expect(second.sessionId).toBe(first.sessionId); // same page session
   });
 
@@ -63,9 +67,9 @@ describe('initialize', () => {
     const naijaAds = initialize({ appId: 'app_1', baseUrl: 'http://api.test' });
     const container = document.createElement('div');
     document.body.appendChild(container);
-    const ad = await naijaAds.loadBanner('pl', { container });
+    const ad = await naijaAds.loadBanner('pl', { container, widthDp: 320 });
     naijaAds.destroyAll();
-    expect(container.querySelector('.naija-ads-test')).toBeNull();
+    expect(container.querySelector('[data-naija-ads="banner"]')).toBeNull();
     await expect(ad.show(container)).rejects.toMatchObject({ code: 'destroyed' });
   });
 });

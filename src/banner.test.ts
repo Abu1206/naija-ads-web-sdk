@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getInitialized, initialize } from './index';
 import { resetSessionId } from './session';
-import { setPaintTimeoutForTests } from './render';
+import { getRenderRootForTests, setGeometryChecksForTests, setPaintTimeoutForTests } from './render';
 
 function jsonResponse(status: number, payload: unknown): Response {
   return new Response(JSON.stringify(payload), { status, headers: { 'Content-Type': 'application/json' } });
@@ -11,6 +11,14 @@ const flush = async (): Promise<void> => {
   await new Promise((resolve) => setTimeout(resolve, 0));
   await new Promise((resolve) => setTimeout(resolve, 0));
 };
+
+function bannerRoot(container: HTMLElement): ShadowRoot {
+  const host = container.querySelector<HTMLElement>('[data-naija-ads="banner"]');
+  if (!host) throw new Error('banner host not found');
+  const root = getRenderRootForTests(host);
+  if (!root) throw new Error('banner shadow root not found');
+  return root;
+}
 
 function eventBodies(fetchMock: { mock: { calls: unknown[][] } }): Array<Record<string, unknown>> {
   return fetchMock.mock.calls
@@ -35,8 +43,10 @@ describe('BannerAd', () => {
   beforeEach(() => {
     resetSessionId();
     setPaintTimeoutForTests(50); // jsdom never fires img load events; skip the long fallback
+    setGeometryChecksForTests(false);
     document.body.innerHTML = '';
     container = document.createElement('div');
+    container.getBoundingClientRect = () => ({ width: 360, height: 100, x: 0, y: 0, top: 0, left: 0, right: 360, bottom: 100, toJSON: () => ({}) });
     document.body.appendChild(container);
   });
 
@@ -61,8 +71,10 @@ describe('BannerAd', () => {
     initialize({ appId: 'app_1', baseUrl: 'http://api.test', mode: 'test' });
 
     const ad = await getInitialized().loadBanner('pl_banner', { container });
-    expect(container.querySelector('.naija-ads-test')).toBeTruthy();
-    expect(container.querySelector('.naija-ads-test')?.textContent).toContain('Test banner · 320×50');
+    const root = bannerRoot(container);
+    expect(root.querySelector('.naija-test')).toBeTruthy();
+    expect(root.querySelector('.naija-test')?.textContent).toContain('Test banner · 320×50');
+    expect(root.textContent).toContain('Test ad');
 
     await flush();
     const impression = eventBodies(fetchMock as never).find((b) => b.event_type === 'impression');
@@ -75,7 +87,10 @@ describe('BannerAd', () => {
     expect(impression?.render_token).toBeUndefined();
 
     ad.destroy();
-    expect(container.querySelector('.naija-ads-test')).toBeNull();
+    expect(container.querySelector('[data-naija-ads="banner"]')).toBeNull();
+    await flush();
+    const viewability = eventBodies(fetchMock as never).find((b) => b.event_type === 'viewability');
+    expect(viewability).toMatchObject({ visible_fraction_bps: 0, continuous_visible_ms: 0 });
   });
 
   it('live: renders the served creative, sends the render token, opens the served click_url', async () => {
@@ -88,16 +103,19 @@ describe('BannerAd', () => {
     initialize({ appId: 'app_1', baseUrl: 'http://api.test', mode: 'live' });
     const openSpy = vi.spyOn(window, 'open').mockReturnValue({} as Window);
 
-    const ad = await getInitialized().loadBanner('pl_banner', { container });
-    const img = container.querySelector('img');
+    const pending = getInitialized().loadBanner('pl_banner', { container, layout: 'anchored' });
+    await flush();
+    const root = bannerRoot(container);
+    const img = root.querySelector('img');
     expect(img?.getAttribute('src')).toBe('http://cdn/img.png');
     img?.dispatchEvent(new Event('load'));
+    const ad = await pending;
     await flush();
 
     const impression = eventBodies(fetchMock as never).find((b) => b.event_type === 'impression');
     expect(impression?.render_token).toBe('tok_1');
 
-    img?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    (root.querySelector('.naija-click') as HTMLButtonElement).click();
     await flush();
     expect(openSpy).toHaveBeenCalledWith('http://adv.example/click', '_blank', 'noopener,noreferrer');
     const click = eventBodies(fetchMock as never).find((b) => b.event_type === 'click');
@@ -133,26 +151,77 @@ describe('BannerAd', () => {
     vi.stubGlobal('fetch', fetchMock);
     initialize({ appId: 'app_1', baseUrl: 'http://api.test', mode: 'live' });
 
-    const ad = await getInitialized().loadBanner('pl_banner', { container });
-    (container.querySelector('img') as HTMLImageElement).dispatchEvent(new Event('load'));
+    const first = getInitialized().loadBanner('pl_banner', { container });
+    await flush();
+    (bannerRoot(container).querySelector('img') as HTMLImageElement).dispatchEvent(new Event('load'));
+    const ad = await first;
     await flush();
 
-    await ad.refresh();
-    (container.querySelector('img') as HTMLImageElement).dispatchEvent(new Event('load'));
+    const refreshed = ad.refresh();
+    await flush();
+    (bannerRoot(container).querySelector('img') as HTMLImageElement).dispatchEvent(new Event('load'));
+    await refreshed;
     await flush();
 
     const impressions = eventBodies(fetchMock as never).filter((b) => b.event_type === 'impression');
     expect(impressions.map((b) => b.impression_id)).toEqual(['imp_1', 'imp_2']);
-    expect((container.querySelector('img') as HTMLImageElement).getAttribute('src')).toBe('http://cdn/img_2.png');
+    expect((bannerRoot(container).querySelector('img') as HTMLImageElement).getAttribute('src')).toBe('http://cdn/img_2.png');
     ad.destroy();
   });
 
+  it('coalesces concurrent refresh triggers into one new request', async () => {
+    let requestCount = 0;
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      if (String(input).endsWith('/v1/ads/request')) {
+        requestCount += 1;
+        return jsonResponse(200, {
+          fill: true, test: false, impression_id: `imp_${requestCount}`, ad_type: 'banner',
+          banner_size: '320x50', expires_in: 600,
+          creative: { kind: 'image', mime_type: 'image/png', url: `http://cdn/${requestCount}.png` },
+          render_token: `tok_${requestCount}`,
+        });
+      }
+      return jsonResponse(202, { accepted: true, duplicate: false });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    initialize({ appId: 'app_1', baseUrl: 'http://api.test', mode: 'live' });
+    const initial = getInitialized().loadBanner('pl_banner', { container });
+    await flush();
+    (bannerRoot(container).querySelector('img') as HTMLImageElement).dispatchEvent(new Event('load'));
+    const ad = await initial;
+
+    const first = ad.refresh();
+    const second = ad.refresh();
+    await flush();
+    (bannerRoot(container).querySelector('img') as HTMLImageElement).dispatchEvent(new Event('load'));
+    await Promise.all([first, second]);
+
+    expect(requestCount).toBe(2);
+  });
+
   it('rejects refresh intervals that would hurt viewability', async () => {
-    stubFetch({ fill: true, test: true, impression_id: 'imp_1', ad_type: 'banner', expires_in: 600 });
+    const fetchMock = stubFetch({ fill: true, test: true, impression_id: 'imp_1', ad_type: 'banner', expires_in: 600 });
     initialize({ appId: 'app_1', baseUrl: 'http://api.test', mode: 'test' });
     await expect(getInitialized().loadBanner('pl', { container, refreshIntervalMs: 1000 })).rejects.toMatchObject({
       code: 'invalid_config',
     });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('test mode exercises keyboard-safe click tracking without navigation', async () => {
+    const fetchMock = stubFetch({
+      fill: true, test: true, impression_id: 'imp_1', ad_type: 'banner', banner_layout: 'anchored', banner_size: '320x50', expires_in: 600,
+    });
+    initialize({ appId: 'app_1', baseUrl: 'http://api.test', mode: 'test' });
+    const ad = await getInitialized().loadBanner('pl_banner', { container, layout: 'anchored' });
+    const clicked = vi.fn();
+    ad.on('click', clicked);
+
+    (bannerRoot(container).querySelector('.naija-click') as HTMLButtonElement).click();
+    await flush();
+
+    expect(clicked).toHaveBeenCalledTimes(1);
+    expect(eventBodies(fetchMock as never).some((body) => body.event_type === 'click')).toBe(true);
   });
 
   it('rejects unknown placements with the server code (R10 diagnostics)', async () => {
@@ -162,5 +231,20 @@ describe('BannerAd', () => {
       code: 'unknown_placement',
       message: expect.stringContaining('dashboard'),
     });
+  });
+
+  it('does not send an impression when a live creative fails to load', async () => {
+    const fetchMock = stubFetch({
+      fill: true, test: false, impression_id: 'imp_bad', ad_type: 'banner', banner_layout: 'anchored', banner_size: '320x50', expires_in: 600,
+      creative: { kind: 'image', mime_type: 'image/png', url: 'http://cdn/broken.png', width: 320, height: 50 },
+      render_token: 'tok_bad',
+    });
+    initialize({ appId: 'app_1', baseUrl: 'http://api.test', mode: 'live' });
+    const pending = getInitialized().loadBanner('pl_banner', { container, layout: 'anchored' });
+    await flush();
+    (bannerRoot(container).querySelector('img') as HTMLImageElement).dispatchEvent(new Event('error'));
+
+    await expect(pending).rejects.toMatchObject({ code: 'creative_failed' });
+    expect(eventBodies(fetchMock as never).some((body) => body.event_type === 'impression')).toBe(false);
   });
 });

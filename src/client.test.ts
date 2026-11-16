@@ -36,26 +36,28 @@ describe('ApiClient.requestAd', () => {
         ad_type: 'banner',
         session_id: 'sess_1',
         mode: 'test',
-        context: { slot_width_dp: 320, device_type: 'phone' },
+        context: { slot_width_dp: 320, slot_height_dp: 100, device_type: 'phone' },
       });
       return jsonResponse(200, {
         fill: true,
         test: true,
         impression_id: 'imp_1',
         ad_type: 'banner',
+        banner_layout: 'anchored',
         banner_size: '320x50',
         expires_in: 600,
-        creative: { kind: 'image', mime_type: 'image/png', url: 'http://cdn/img.png', width: 320, height: 50 },
+        creative: { kind: 'image', mime_type: 'image/png', url: 'http://cdn/img.png', width: 640, height: 100, pixel_ratio: 2 },
         click_url: 'http://adv.example/go',
         render_token: 'tok_1',
       });
     });
     const client = makeClient(fetchMock as unknown as typeof fetch);
-    const response = await client.requestAd({ placementId: 'pl_1', adType: 'banner', sessionId: 'sess_1', slotWidthDp: 320, deviceType: 'phone' });
+    const response = await client.requestAd({ placementId: 'pl_1', adType: 'banner', sessionId: 'sess_1', slotWidthDp: 320, slotHeightDp: 100, deviceType: 'phone' });
     expect(response).toMatchObject({
       fill: true,
       test: true,
       impressionId: 'imp_1',
+      bannerLayout: 'anchored',
       bannerSize: '320x50',
       expiresIn: 600,
       clickUrl: 'http://adv.example/go',
@@ -63,6 +65,12 @@ describe('ApiClient.requestAd', () => {
     });
     expect(response.creative?.url).toBe('http://cdn/img.png');
     expect(response.creative?.mimeType).toBe('image/png');
+    expect(response.creative?.pixelRatio).toBe(2);
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      credentials: 'omit',
+      referrerPolicy: 'no-referrer',
+      cache: 'no-store',
+    });
   });
 
   it('returns a no-fill as a response, never an error', async () => {

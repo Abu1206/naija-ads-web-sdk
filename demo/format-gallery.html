@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Naija Ads SDK 0.3 — responsive format gallery</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 32px; background: #f4f5f2; color: #142018; font: 14px/1.5 system-ui, sans-serif; }
+    header { max-width: 1120px; margin: 0 auto 24px; }
+    h1 { margin: 0; font-size: clamp(26px, 4vw, 42px); }
+    header p { max-width: 700px; color: #5f6c64; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 20px; max-width: 1120px; margin: auto; }
+    .card { min-width: 0; padding: 18px; border: 1px solid #d7ddd8; border-radius: 14px; background: #fff; box-shadow: 0 8px 28px rgba(20,32,24,.06); }
+    .card h2 { margin: 0 0 4px; font-size: 16px; }
+    .meta { margin: 0 0 14px; color: #6d786f; font-size: 12px; }
+    .device { display: grid; place-items: end center; width: 100%; min-height: 260px; overflow: hidden; border: 8px solid #1c211e; border-radius: 24px; background: linear-gradient(#edf3ee 0 72%, #dfe8e1 72%); }
+    .phone { max-width: 360px; min-height: 520px; margin: auto; }
+    .tablet { max-width: 768px; min-height: 420px; }
+    .desktop { max-width: 100%; min-height: 380px; border-radius: 12px; }
+    .slot { display: grid; place-items: center; width: 100%; background: #fff; border-top: 1px solid #ccd5ce; }
+    #phone-slot { min-height: 100px; }
+    #desktop-slot { min-height: 90px; }
+    #inline-slot { width: min(100%, 336px); min-height: 280px; margin: 32px auto; border: 1px dashed #aab7ad; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; max-width: 1120px; margin: 20px auto 0; }
+    button { min-height: 44px; padding: 0 16px; border: 0; border-radius: 9px; background: #087532; color: #fff; font-weight: 700; cursor: pointer; }
+    #log { max-width: 1120px; min-height: 44px; margin: 14px auto 0; padding: 12px; border-radius: 8px; background: #142018; color: #d9f6e2; font: 12px/1.5 ui-monospace, monospace; }
+    @media (max-width: 600px) { .desktop-card { display: none; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Responsive format gallery</h1>
+    <p>Deterministic test creatives rendered by the real 0.3 browser bundle. The frames show an anchored mobile strip, desktop leaderboard, and inline content rectangle without mixing their layouts.</p>
+  </header>
+  <main class="grid">
+    <article class="card">
+      <h2>Phone · anchored</h2>
+      <p class="meta">360px safe width → 320×100 logical creative</p>
+      <div class="device phone"><div id="phone-slot" class="slot"></div></div>
+    </article>
+    <article class="card desktop-card">
+      <h2>Desktop · anchored</h2>
+      <p class="meta">970px available → 970×90 leaderboard</p>
+      <div class="device desktop"><div id="desktop-slot" class="slot"></div></div>
+    </article>
+    <article class="card">
+      <h2>Content · inline</h2>
+      <p class="meta">Scrollable content → 336×280 rectangle</p>
+      <div class="device tablet"><div id="inline-slot"></div></div>
+    </article>
+  </main>
+  <div class="actions">
+    <button id="interstitial">Preview interstitial</button>
+    <button id="rewarded">Preview rewarded (5s)</button>
+    <button id="audio">Preview audio card</button>
+  </div>
+  <div id="audio-slot" style="max-width:420px;margin:14px auto 0"></div>
+  <div id="log" role="status">Ready.</div>
+
+  <script>
+    const bannerResponses = {
+      phone: { banner_layout: 'anchored', banner_size: '320x100' },
+      desktop: { banner_layout: 'anchored', banner_size: '970x90' },
+      inline: { banner_layout: 'inline', banner_size: '336x280' },
+    };
+    let sequence = 0;
+    window.fetch = async (url, init) => {
+      const body = JSON.parse(init.body);
+      if (String(url).endsWith('/v1/ads/events')) {
+        log(`${body.event_type} · ${body.placement_id}`);
+        return new Response(JSON.stringify({ accepted: true, duplicate: false }), { status: 202, headers: { 'Content-Type': 'application/json' } });
+      }
+      sequence += 1;
+      const geometry = bannerResponses[body.placement_id] || {};
+      return new Response(JSON.stringify({
+        fill: true, test: true, impression_id: `imp_gallery_${sequence}`, ad_type: body.ad_type,
+        expires_in: 600, ...geometry,
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+    function log(message) { document.getElementById('log').textContent = message; }
+  </script>
+  <script src="../dist/index.global.js"></script>
+  <script>
+    const ads = NaijaAds.initialize({ appId: 'app_gallery', baseUrl: 'http://gallery.test', mode: 'test' });
+    Promise.all([
+      ads.loadBanner('phone', { container: document.getElementById('phone-slot'), layout: 'anchored', widthDp: 360, maxHeightDp: 120 }),
+      ads.loadBanner('desktop', { container: document.getElementById('desktop-slot'), layout: 'anchored', widthDp: 970, maxHeightDp: 100 }),
+      ads.loadBanner('inline', { container: document.getElementById('inline-slot'), layout: 'inline', widthDp: 336, maxHeightDp: 280 }),
+    ]).catch((error) => log(`${error.code}: ${error.message}`));
+
+    document.getElementById('interstitial').onclick = async () => {
+      const ad = await ads.loadInterstitial('interstitial');
+      await ad.show();
+      log('Interstitial dismissed.');
+    };
+    document.getElementById('rewarded').onclick = async () => {
+      const ad = await ads.loadRewarded('rewarded');
+      const result = await ad.show();
+      log(`Rewarded result: ${result.status} (test=${result.test})`);
+    };
+    document.getElementById('audio').onclick = async () => {
+      document.getElementById('audio-slot').replaceChildren();
+      await ads.loadAudio('audio', { container: document.getElementById('audio-slot') });
+      log('Audio test card ready; playback requires the user button.');
+    };
+  </script>
+</body>
+</html>

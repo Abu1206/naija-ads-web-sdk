@@ -8,6 +8,7 @@
 export type AdMode = 'test' | 'live';
 export type AdType = 'banner' | 'interstitial' | 'rewarded' | 'audio';
 export type DeviceType = 'phone' | 'tablet' | 'desktop';
+export type BannerLayout = 'anchored' | 'inline';
 
 // ---------------------------------------------------------------------------
 // Wire types (snake_case, exactly as the Go server encodes them)
@@ -23,6 +24,7 @@ export interface AdRequestWire {
     country?: string;
     category?: string;
     slot_width_dp?: number;
+    slot_height_dp?: number;
     device_type?: string;
   };
 }
@@ -37,6 +39,7 @@ export interface CreativeWire {
   poster_url?: string | null;
   companion_url?: string | null;
   companion_size?: string | null;
+  pixel_ratio?: number;
 }
 
 export interface AdResponseWire {
@@ -46,6 +49,7 @@ export interface AdResponseWire {
   impression_id?: string;
   ad_type?: string;
   banner_size?: string | null;
+  banner_layout?: string | null;
   expires_in?: number;
   creative?: CreativeWire;
   click_url?: string | null;
@@ -63,6 +67,10 @@ export interface EventWire {
   render_token?: string;
   /** Diagnostic only (ADR 0010); omitted by default so device clocks cannot reject events. */
   client_ts?: string;
+  /** Required only for viewability observations (ADR 0018/0022). */
+  visible_fraction_bps?: number;
+  continuous_visible_ms?: number;
+  audible?: boolean;
 }
 
 export interface RewardWire {
@@ -92,6 +100,7 @@ export interface Creative {
   posterUrl?: string;
   companionUrl?: string;
   companionSize?: string;
+  pixelRatio?: number;
 }
 
 export interface AdResponse {
@@ -101,6 +110,7 @@ export interface AdResponse {
   impressionId?: string;
   adType?: string;
   bannerSize?: string | null;
+  bannerLayout?: BannerLayout | null;
   expiresIn?: number;
   creative?: Creative;
   clickUrl?: string | null;
@@ -129,6 +139,10 @@ export function mapAdResponse(wire: AdResponseWire): AdResponse {
     impressionId: wire.impression_id,
     adType: wire.ad_type,
     bannerSize: wire.banner_size ?? null,
+    bannerLayout:
+      wire.banner_layout === 'anchored' || wire.banner_layout === 'inline'
+        ? wire.banner_layout
+        : null,
     expiresIn: wire.expires_in,
     creative: wire.creative ? mapCreative(wire.creative) : undefined,
     clickUrl: wire.click_url ?? null,
@@ -147,6 +161,7 @@ function mapCreative(w: CreativeWire): Creative {
     posterUrl: w.poster_url ?? undefined,
     companionUrl: w.companion_url ?? undefined,
     companionSize: w.companion_size ?? undefined,
+    pixelRatio: w.pixel_ratio,
   };
 }
 

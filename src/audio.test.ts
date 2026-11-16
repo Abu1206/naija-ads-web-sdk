@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getInitialized, initialize } from './index';
 import { resetSessionId } from './session';
-import { setPaintTimeoutForTests } from './render';
+import { getRenderRootForTests, setGeometryChecksForTests, setPaintTimeoutForTests } from './render';
 
 function jsonResponse(status: number, payload: unknown): Response {
   return new Response(JSON.stringify(payload), { status, headers: { 'Content-Type': 'application/json' } });
@@ -36,11 +36,19 @@ function stubFetch(requestResponse: unknown): ReturnType<typeof vi.fn> {
   return fetchMock;
 }
 
+function audioRoot(container: HTMLElement): ShadowRoot {
+  const host = container.querySelector<HTMLElement>('[data-naija-ads="audio"]');
+  if (!host) throw new Error('audio host not found');
+  const root = getRenderRootForTests(host);
+  if (!root) throw new Error('audio shadow root not found');
+  return root;
+}
+
 const LIVE_FILL = {
   fill: true, test: false, impression_id: 'imp_7', ad_type: 'audio', expires_in: 600,
   creative: {
     kind: 'audio', mime_type: 'audio/mpeg', url: 'http://cdn/ad.mp3', duration_ms: 15_000,
-    companion_url: 'http://cdn/companion.png', companion_size: '300x50',
+    companion_url: 'http://cdn/companion.png', companion_size: '320x50',
   },
   click_url: 'http://adv.example/click',
   render_token: 'atok_1',
@@ -52,12 +60,15 @@ describe('AudioAd', () => {
   beforeEach(() => {
     resetSessionId();
     setPaintTimeoutForTests(50);
+    setGeometryChecksForTests(false);
     document.body.innerHTML = '';
     container = document.createElement('div');
     document.body.appendChild(container);
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
   });
 
   afterEach(() => {
+    try { getInitialized().destroyAll(); } catch {}
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -69,7 +80,8 @@ describe('AudioAd', () => {
     initialize({ appId: 'app_1', baseUrl: 'http://api.test', mode: 'test' });
 
     const ad = await getInitialized().loadAudio('pl_audio', { container, testAudioDurationMs: 30 });
-    const card = container.querySelector('.naija-ads-audio');
+    const root = audioRoot(container);
+    const card = root.querySelector('.naija-audio');
     expect(card).toBeTruthy();
     expect(card?.textContent).toContain('Test companion banner');
     await flush();
@@ -77,13 +89,13 @@ describe('AudioAd', () => {
 
     const completed = vi.fn();
     ad.on('completed', completed);
-    (card!.querySelector('.naija-ads-audio-btn') as HTMLButtonElement).click();
+    (card!.querySelector('.naija-audio-btn') as HTMLButtonElement).click();
     await until(() => eventBodies(fetchMock as never).some((b) => b.event_type === 'audio_started'));
     await until(() => eventBodies(fetchMock as never).some((b) => b.event_type === 'audio_completed'));
     expect(completed).toHaveBeenCalledTimes(1);
 
     ad.destroy();
-    expect(container.querySelector('.naija-ads-audio')).toBeNull();
+    expect(container.querySelector('[data-naija-ads="audio"]')).toBeNull();
   });
 
   it('live: renders the companion banner, attests with the render token, reports playback', async () => {
@@ -91,9 +103,13 @@ describe('AudioAd', () => {
     initialize({ appId: 'app_1', baseUrl: 'http://api.test', mode: 'live' });
     const openSpy = vi.spyOn(window, 'open').mockReturnValue({} as Window);
 
-    await getInitialized().loadAudio('pl_audio', { container });
-    const audio = container.querySelector('audio') as HTMLAudioElement;
-    const companion = container.querySelector('.naija-ads-companion') as HTMLImageElement;
+    const pending = getInitialized().loadAudio('pl_audio', { container });
+    await flush();
+    const root = audioRoot(container);
+    const companion = root.querySelector('.naija-companion') as HTMLImageElement;
+    companion.dispatchEvent(new Event('load'));
+    await pending;
+    const audio = root.querySelector('audio') as HTMLAudioElement;
     expect(audio?.getAttribute('src')).toBe('http://cdn/ad.mp3');
     expect(companion?.getAttribute('src')).toBe('http://cdn/companion.png');
 
@@ -106,7 +122,7 @@ describe('AudioAd', () => {
     const impression = eventBodies(fetchMock as never).find((b) => b.event_type === 'impression');
     expect(impression?.render_token).toBe('atok_1');
 
-    companion.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    (root.querySelector('.naija-click') as HTMLButtonElement).click();
     await flush();
     expect(openSpy).toHaveBeenCalledWith('http://adv.example/click', '_blank', 'noopener,noreferrer');
     expect(eventBodies(fetchMock as never).some((b) => b.event_type === 'click')).toBe(true);
@@ -115,8 +131,12 @@ describe('AudioAd', () => {
   it('pausing before the end claims no completion', async () => {
     const fetchMock = stubFetch(LIVE_FILL);
     initialize({ appId: 'app_1', baseUrl: 'http://api.test', mode: 'live' });
-    await getInitialized().loadAudio('pl_audio', { container });
-    const audio = container.querySelector('audio') as HTMLAudioElement;
+    const pending = getInitialized().loadAudio('pl_audio', { container });
+    await flush();
+    const root = audioRoot(container);
+    (root.querySelector('.naija-companion') as HTMLImageElement).dispatchEvent(new Event('load'));
+    await pending;
+    const audio = root.querySelector('audio') as HTMLAudioElement;
 
     audio.dispatchEvent(new Event('playing'));
     await flush();
@@ -135,13 +155,13 @@ describe('AudioAd', () => {
     initialize({ appId: 'app_1', baseUrl: 'http://api.test', mode: 'test' });
     const ad = await getInitialized().loadAudio('pl_audio', { container, testAudioDurationMs: 30_000 });
 
-    (container.querySelector('.naija-ads-audio-btn') as HTMLButtonElement).click();
+    (audioRoot(container).querySelector('.naija-audio-btn') as HTMLButtonElement).click();
     await flush();
     ad.destroy();
     await flush();
 
     expect(eventBodies(fetchMock as never).some((b) => b.event_type === 'audio_completed')).toBe(false);
-    expect(container.querySelector('.naija-ads-audio')).toBeNull();
+    expect(container.querySelector('[data-naija-ads="audio"]')).toBeNull();
   });
 
   it('no-fill rejects with code no_fill and the server reason', async () => {

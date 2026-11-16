@@ -1,96 +1,175 @@
 /**
- * DOM helpers: one injected stylesheet, paint detection for render
- * attestation (ADR 0010), size parsing and safe click-through.
- * No framework, no dependencies — the SDK must stay tiny for games.
+ * Isolated rendering primitives shared by all formats (ADR 0003).
+ * Every ad owns a closed ShadowRoot: publisher CSS cannot resize an inner
+ * close control or remove attribution, while the publisher still owns where
+ * the host slot sits in its page.
  */
-
-const STYLE_ID = 'naija-ads-sdk-styles';
+import { NaijaAdsError } from './errors';
+import type { BannerLayout, DeviceType } from './types';
 
 const CSS = `
-.naija-ads-slot{position:relative}
-.naija-ads-banner{position:relative;display:inline-block;overflow:hidden;cursor:pointer;max-width:100%}
-.naija-ads-banner img{display:block;max-width:100%;height:auto}
-.naija-ads-overlay{position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.86);display:flex;align-items:center;justify-content:center}
-.naija-ads-close{position:absolute;top:12px;right:12px;z-index:2;width:36px;height:36px;border:0;border-radius:50%;background:rgba(255,255,255,.92);color:#111;font-size:18px;line-height:36px;cursor:pointer;padding:0}
-.naija-ads-close:disabled{opacity:.4;cursor:default}
-.naija-ads-media{max-width:96vw;max-height:92vh;display:block}
-.naija-ads-audio{display:flex;flex-direction:column;gap:8px;padding:10px;border:1px solid #e2e2e2;border-radius:8px;background:#fff;max-width:420px;font-family:system-ui,-apple-system,sans-serif}
-.naija-ads-companion{display:block;width:100%;height:auto;border-radius:6px;cursor:pointer}
-.naija-ads-audio-row{display:flex;align-items:center;gap:10px}
-.naija-ads-audio-btn{flex:0 0 auto;width:36px;height:36px;border:0;border-radius:50%;background:#0a7d33;color:#fff;font-size:13px;cursor:pointer;padding:0}
-.naija-ads-progress{position:relative;width:70%;height:8px;background:rgba(0,0,0,.15);border-radius:4px;overflow:hidden}
-.naija-ads-overlay .naija-ads-progress{background:rgba(255,255,255,.3)}
-.naija-ads-progress-grow{flex:1 1 auto}
-.naija-ads-progress-fill{position:absolute;inset:0;width:0%;background:#0a7d33;transition:width .1s linear}
-.naija-ads-overlay .naija-ads-progress-fill{background:#fff}
-.naija-ads-test{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;background:linear-gradient(135deg,#0a7d33,#12b34a);color:#fff;font-family:system-ui,-apple-system,sans-serif;text-align:center;border-radius:6px;box-sizing:border-box}
-.naija-ads-test-title{font-weight:700;font-size:14px;margin:0}
-.naija-ads-test-sub{font-size:11px;opacity:.85;margin:0}
-.naija-ads-test-full{width:min(92vw,480px);height:min(72vh,640px)}
-.naija-ads-test-strip{width:100%;padding:10px;cursor:pointer}
+:host{all:initial;box-sizing:border-box;color-scheme:light;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+:host([data-display="inline"]){display:block;position:relative;width:100%;line-height:normal;contain:layout style paint}
+:host([data-display="overlay"]){display:block;position:fixed;inset:0;width:100vw;height:100vh;height:100dvh;z-index:2147483647;line-height:normal}
+*{box-sizing:border-box}
+button{font:inherit}
+button:focus-visible{outline:3px solid #fff;outline-offset:3px}
+.naija-frame{position:relative;display:grid;place-items:center;overflow:hidden;margin-inline:auto;max-width:100%;background:#fff}
+.naija-click{display:block;position:relative;width:100%;height:100%;margin:0;padding:0;border:0;background:transparent;color:inherit;cursor:pointer}
+.naija-banner-img,.naija-companion{display:block;width:100%;height:100%;object-fit:contain}
+.naija-badge{position:absolute;top:4px;left:4px;z-index:3;padding:3px 5px;border-radius:3px;background:rgba(0,0,0,.72);color:#fff;font:700 10px/1 system-ui,sans-serif;letter-spacing:.02em;pointer-events:none}
+.naija-overlay{position:absolute;inset:0;display:grid;place-items:center;overflow:hidden;background:#000;color:#fff}
+.naija-media-shell{position:absolute;inset:0;display:grid;place-items:center;padding:max(12px,env(safe-area-inset-top)) max(12px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left))}
+.naija-media{display:block;width:100%;height:100%;min-width:0;min-height:0;object-fit:contain;background:#000}
+.naija-close,.naija-sound,.naija-play{position:absolute;z-index:4;min-width:44px;min-height:44px;border:0;border-radius:999px;background:rgba(255,255,255,.96);color:#111;cursor:pointer;box-shadow:0 2px 12px rgba(0,0,0,.28)}
+.naija-close{top:max(12px,env(safe-area-inset-top));right:max(12px,env(safe-area-inset-right));width:44px;height:44px;padding:0;font-size:24px;line-height:1}
+.naija-sound{right:max(12px,env(safe-area-inset-right));bottom:max(12px,env(safe-area-inset-bottom));padding:0 14px;font-size:13px;font-weight:700}
+.naija-play{inset:50% auto auto 50%;transform:translate(-50%,-50%);padding:0 18px;font-size:14px;font-weight:700}
+.naija-audio{display:flex;flex-direction:column;gap:10px;width:min(100%,420px);margin-inline:auto;padding:10px;border:1px solid #d9dde0;border-radius:10px;background:#fff;color:#111}
+.naija-audio-row{display:flex;align-items:center;gap:10px}
+.naija-audio-btn{flex:0 0 auto;width:44px;height:44px;border:0;border-radius:50%;background:#0a7d33;color:#fff;font-size:15px;cursor:pointer;padding:0}
+.naija-audio-btn:focus-visible{outline-color:#0a7d33}
+.naija-progress{position:relative;flex:1 1 auto;height:8px;background:rgba(0,0,0,.15);border-radius:999px;overflow:hidden}
+.naija-overlay .naija-progress{position:absolute;left:max(16px,env(safe-area-inset-left));right:max(16px,env(safe-area-inset-right));bottom:max(20px,env(safe-area-inset-bottom));z-index:3;background:rgba(255,255,255,.32)}
+.naija-progress-fill{position:absolute;inset:0;width:0%;background:#0a7d33;transition:width .1s linear}
+.naija-overlay .naija-progress-fill{background:#fff}
+.naija-test{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;width:100%;height:100%;background:linear-gradient(135deg,#075f29,#0c9a42);color:#fff;text-align:center}
+.naija-test-title{font-weight:800;font-size:14px;margin:0}
+.naija-test-sub{font-size:11px;opacity:.9;margin:0}
+.naija-test-full{width:min(100%,480px);height:min(100%,640px);border-radius:10px}
+.naija-test-strip{min-height:50px;padding:10px;border-radius:6px}
+@media (prefers-reduced-motion:reduce){.naija-progress-fill{transition:none}}
 `;
 
-/** Injects the SDK stylesheet exactly once. */
-export function ensureStyles(): void {
-  if (document.getElementById(STYLE_ID)) return;
+type DisplayKind = 'inline' | 'overlay';
+
+const testRoots = new WeakMap<HTMLElement, ShadowRoot>();
+
+export interface Surface {
+  host: HTMLElement;
+  root: ShadowRoot;
+}
+
+export function createSurface(display: DisplayKind, format: string): Surface {
+  const host = document.createElement('div');
+  host.dataset.naijaAds = format;
+  host.dataset.display = display;
+  const root = host.attachShadow({ mode: 'closed' });
   const style = document.createElement('style');
-  style.id = STYLE_ID;
   style.textContent = CSS;
-  document.head.appendChild(style);
+  root.appendChild(style);
+  testRoots.set(host, root);
+  return { host, root };
+}
+
+/** Test-only hook (not exported from the package entry). */
+export function getRenderRootForTests(host: HTMLElement): ShadowRoot | undefined {
+  return testRoots.get(host);
 }
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/**
- * Cap for waiting on media paint before attesting anyway. Real browsers fire
- * load/decode events quickly; the timeout exists for pathological cases and
- * for DOM-less test environments. Tests may shorten it.
- */
-let paintTimeoutMs = 3000;
+let paintTimeoutMs = 15_000;
+let geometryChecks = true;
 
-/** Test-only hook (not exported from the bundle entry): shortens the paint wait. */
+/** Test-only hooks (not exported from the package entry). */
 export function setPaintTimeoutForTests(ms: number): void {
   paintTimeoutMs = ms;
+}
+
+export function setGeometryChecksForTests(value: boolean): void {
+  geometryChecks = value;
 }
 
 function animationFrame(): Promise<void> {
   if (typeof requestAnimationFrame === 'function') {
     return new Promise((resolve) => requestAnimationFrame(() => resolve()));
   }
-  // jsdom and very old browsers: a macrotask tick is close enough.
   return delay(16);
 }
 
-/**
- * Resolves when `el` actually painted: media decoded/first frame + two
- * animation frames. Falls back after `timeoutMs` so a hung media element can
- * never stall the impression forever.
- */
-export async function waitForPaint(el: HTMLElement, timeoutMs = paintTimeoutMs): Promise<void> {
-  const painted = (async () => {
-    if (el instanceof HTMLImageElement) {
-      if (!el.complete) {
-        await new Promise<void>((resolve) => {
-          el.addEventListener('load', () => resolve(), { once: true });
-          el.addEventListener('error', () => resolve(), { once: true });
-        });
-      }
-    } else if (el instanceof HTMLVideoElement && el.readyState < 2) {
-      await new Promise<void>((resolve) => {
-        el.addEventListener('loadeddata', () => resolve(), { once: true });
-        el.addEventListener('playing', () => resolve(), { once: true });
-        el.addEventListener('error', () => resolve(), { once: true });
+async function mediaReady(el: HTMLElement): Promise<void> {
+  if (el instanceof HTMLImageElement) {
+    if (!el.complete) {
+      await new Promise<void>((resolve, reject) => {
+        const cleanup = (): void => {
+          el.removeEventListener('load', loaded);
+          el.removeEventListener('error', failed);
+        };
+        const loaded = (): void => { cleanup(); resolve(); };
+        const failed = (): void => { cleanup(); reject(new Error('image load failed')); };
+        el.addEventListener('load', loaded);
+        el.addEventListener('error', failed);
       });
     }
-  })();
-  await Promise.race([painted, delay(timeoutMs)]);
-  await animationFrame();
-  await animationFrame();
+    if (geometryChecks && el.naturalWidth <= 0) throw new Error('image decode failed');
+    if (typeof el.decode === 'function') await el.decode();
+    return;
+  }
+  if (el instanceof HTMLVideoElement) {
+    if (el.readyState >= 2) return;
+    await new Promise<void>((resolve, reject) => {
+      const cleanup = (): void => {
+        el.removeEventListener('loadeddata', ready);
+        el.removeEventListener('playing', ready);
+        el.removeEventListener('error', failed);
+      };
+      const ready = (): void => { cleanup(); resolve(); };
+      const failed = (): void => { cleanup(); reject(new Error('video load failed')); };
+      el.addEventListener('loadeddata', ready);
+      el.addEventListener('playing', ready);
+      el.addEventListener('error', failed);
+    });
+    return;
+  }
 }
 
-/** Parses "WxH" banner sizes ("320x50"). Returns null when malformed. */
+function renderedGeometry(el: HTMLElement): boolean {
+  if (!el.isConnected) return false;
+  const rect = el.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return false;
+
+  let current: HTMLElement | null = el;
+  while (current) {
+    const style = getComputedStyle(current);
+    if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || Number(style.opacity) === 0) {
+      return false;
+    }
+    const root = current.getRootNode();
+    current = current.parentElement ?? (root instanceof ShadowRoot && root.host instanceof HTMLElement ? root.host : null);
+  }
+  return true;
+}
+
+/**
+ * Resolves only after decode/first frame, connected non-zero geometry and two
+ * animation frames. Error or timeout rejects: a broken/hidden creative must
+ * never be attested as painted.
+ */
+export async function waitForPaint(el: HTMLElement, timeoutMs = paintTimeoutMs): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  try {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    await new Promise<void>((resolve, reject) => {
+      timeout = setTimeout(() => reject(new Error('paint timeout')), timeoutMs);
+      void mediaReady(el).then(resolve, reject);
+    }).finally(() => {
+      if (timeout !== undefined) clearTimeout(timeout);
+    });
+    await animationFrame();
+    await animationFrame();
+    while (geometryChecks && !renderedGeometry(el)) {
+      if (Date.now() >= deadline) throw new Error('creative has no rendered geometry');
+      await animationFrame();
+    }
+  } catch (cause) {
+    throw new NaijaAdsError('creative_failed', 'The creative failed before it painted; no impression was sent.', { cause });
+  }
+}
+
+/** Parses a logical "WxH" size. */
 export function parseSize(size: string | null): { width: number; height: number } | null {
   if (!size) return null;
   const match = /^(\d+)x(\d+)$/.exec(size.trim());
@@ -101,26 +180,93 @@ export function parseSize(size: string | null): { width: number; height: number 
   return { width, height };
 }
 
-/**
- * Adaptive slots (ADR 0012): report the slot's width in CSS px. Clamped to
- * the server's 1..4096 range; undefined when unmeasurable (server then uses
- * the placement's first preference).
- */
-export function measureWidthDp(el?: HTMLElement | null, override?: number): number | undefined {
-  const raw = override ?? (el ? el.getBoundingClientRect().width : undefined);
+function clampDimension(raw: number | undefined): number | undefined {
   if (raw === undefined || !Number.isFinite(raw) || raw <= 0) return undefined;
   return Math.min(4096, Math.max(1, Math.round(raw)));
 }
 
-/** Opens the served click_url in a new tab; falls back to same-tab navigation. */
+export function measureWidthDp(el?: HTMLElement | null, override?: number): number | undefined {
+  return clampDimension(override ?? (el ? el.getBoundingClientRect().width : undefined));
+}
+
+export function measureHeightDp(el?: HTMLElement | null, override?: number): number | undefined {
+  return clampDimension(override ?? (el ? el.getBoundingClientRect().height : undefined));
+}
+
+/** Google-style large anchored ceiling: 20% of visible height, max 150 CSS px. */
+export function anchoredMaxHeightDp(): number | undefined {
+  const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+  return clampDimension(Math.min(150, Math.floor(viewportHeight * 0.2)));
+}
+
+export function slotHeightDp(layout?: BannerLayout, container?: HTMLElement | null, override?: number): number | undefined {
+  if (override !== undefined) return clampDimension(override);
+  if (layout === 'anchored') return anchoredMaxHeightDp();
+  // An explicitly reserved inline container may provide a real ceiling. A 0px
+  // pre-load container is intentionally omitted rather than causing no-fill.
+  return measureHeightDp(container);
+}
+
+export function detectDeviceType(): DeviceType {
+  const width = window.visualViewport?.width ?? window.innerWidth;
+  if (width <= 600) return 'phone';
+  if (width <= 1024) return 'tablet';
+  return 'desktop';
+}
+
+/** Opens exactly the served URL; navigation remains in the user's gesture. */
 export function openClickUrl(url: string): void {
-  if (!/^https?:\/\//i.test(url)) return; // server only sends http(s); belt and suspenders
+  if (!/^https?:\/\//i.test(url)) return;
   const win = window.open(url, '_blank', 'noopener,noreferrer');
-  if (!win) window.location.href = url; // popup blocker fallback (still a user gesture)
+  if (!win) window.location.href = url;
 }
 
 export function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
   if (className) node.className = className;
   return node;
+}
+
+interface InertState { node: HTMLElement; inert: boolean }
+
+/** Makes a Shadow-DOM overlay a real modal and restores the host page exactly. */
+export function activateModal(surface: Surface, initialFocus: HTMLElement, onEscape: () => void): () => void {
+  const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const previousOverflow = document.body.style.overflow;
+  const inertStates: InertState[] = [];
+  for (const child of Array.from(document.body.children)) {
+    if (!(child instanceof HTMLElement) || child === surface.host) continue;
+    inertStates.push({ node: child, inert: child.inert });
+    child.inert = true;
+  }
+  document.body.style.overflow = 'hidden';
+
+  const keydown = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      onEscape();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const focusable = Array.from(surface.root.querySelectorAll<HTMLElement>(
+      'button:not([disabled]),a[href],[tabindex]:not([tabindex="-1"])',
+    )).filter((node) => !node.hidden);
+    if (focusable.length === 0) return;
+    const current = surface.root.activeElement;
+    const index = focusable.indexOf(current as HTMLElement);
+    const next = event.shiftKey
+      ? focusable[(index <= 0 ? focusable.length : index) - 1]
+      : focusable[(index + 1) % focusable.length];
+    event.preventDefault();
+    next?.focus();
+  };
+  window.addEventListener('keydown', keydown);
+  initialFocus.focus();
+
+  return () => {
+    window.removeEventListener('keydown', keydown);
+    document.body.style.overflow = previousOverflow;
+    for (const state of inertStates) state.node.inert = state.inert;
+    if (previousFocus?.isConnected) previousFocus.focus();
+  };
 }
