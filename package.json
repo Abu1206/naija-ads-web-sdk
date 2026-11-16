@@ -2,6 +2,14 @@
   "name": "naija-ads-web-sdk",
   "version": "0.3.0",
   "description": "Web SDK for Naija Ads: layout-safe banner, interstitial, rewarded and audio ads.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Abu1206/naija-ads-web-sdk.git"
+  },
+  "homepage": "https://github.com/Abu1206/naija-ads-web-sdk#readme",
+  "bugs": {
+    "url": "https://github.com/Abu1206/naija-ads-web-sdk/issues"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
