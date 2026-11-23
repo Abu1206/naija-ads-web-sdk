@@ -34,9 +34,9 @@
   "devDependencies": {
     "@types/node": "^26.6.5",
     "jsdom": "^26.1.0",
-    "tsup": "^8.5.0",
+    "tsup": "^9.0.0",
     "typescript": "^5.9.2",
-    "vitest": "^3.2.4"
+    "vitest": "^5.1.1"
   },
   "engines": {
     "node": ">=20"
@@ -45,5 +45,5 @@
     "access": "public",
     "registry": "https://registry.npmjs.org/"
   },
-  "license": "UNLICENSED"
+  "license": "Apache-2.0"
 }

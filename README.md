@@ -11,7 +11,7 @@ Build rules: [`AGENTS.md`](./AGENTS.md) · Decisions: [`docs/adr/`](./docs/adr/)
 
 ## Release status
 
-Version **0.3.0** is prepared for the npm/CDN release and backend OpenAPI **0.5.0**. The registry package is not live until the release owner runs the reviewed publish workflow. For a pilot build today:
+Version **0.3.0** is prepared for the npm/CDN release and backend OpenAPI **0.5.0**. The registry package is not live until the release owner runs the reviewed publish workflow. Publication uses npm trusted publishing from the protected `npm` environment; no long-lived npm token is stored in this repository. For a pilot build today:
 
 ```bash
 npm ci
@@ -106,6 +106,9 @@ Audio is an inline, user-initiated player with 44px controls and a required comp
 
 ## Development
 
+Requires Node 22.18+ for the local toolchain. The published SDK itself has no Node runtime
+requirement.
+
 ```bash
 npm run typecheck
 npm test
@@ -119,3 +122,9 @@ npm pack --dry-run
 | --- | --- | --- |
 | 0.3.x | OpenAPI 0.5.x / ADR 0022 | canonical four-format renderer, layout-safe sizing, high-DPI, viewability |
 | 0.2.x | pre-ADR-0022 | superseded pilot; do not deploy alongside the retired backend SDK |
+
+## License
+
+Apache-2.0. See [`LICENSE`](./LICENSE). The license covers the SDK code; it does not grant rights
+to the 9ja Ads name, logos, backend service, or advertising inventory. This repository publishes a
+Web SDK only — there is no Android or iOS artifact.

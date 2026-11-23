@@ -15,6 +15,7 @@ Four MVP formats, banner first-class: **banner (fixed + adaptive), interstitial,
 ## 2. Tech rules (do not change without RFC)
 
 - **TypeScript strict, zero runtime dependencies.** `npm ls --prod` must list nothing. The SDK ships into other people's games; every byte and dep is a tax on them.
+- Development requires **Node 22.18+** (Vitest 5 + tsup 9 toolchain; CI tracks the current Node 22 release). The published package has no Node runtime requirement because it runs in browsers.
 - Two artifacts via tsup: `dist/index.js` (ESM for bundlers) and `dist/index.global.js` (IIFE exposing `window.NaijaAds` for plain `<script>`). Both minified, with d.ts.
 - Tests: **Vitest + jsdom**, colocated `src/*.test.ts`. No browser-only CI flakiness: jsdom + fetch mocks only.
 - No build-time bundling of CSS frameworks, no React/Vue adapters in core (wrappers can live in separate packages later).
@@ -98,3 +99,6 @@ Semver. The SDK is coupled to the backend contract: a release notes the backend 
 ## 9. Working agreements (details in CONTRIBUTING.md + docs/COLLABORATION.md)
 
 Branches `feat/<issue>-<slug>`, Conventional Commits, small PRs (<400 lines) with test evidence, 1 approval, CI green, squash-merge. Contract changes need the backend PR linked in the description.
+
+The package is Apache-2.0. Contributions are accepted under the same license; do not add code,
+fonts, images, or dependencies with incompatible terms.
