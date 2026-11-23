@@ -38,4 +38,8 @@ The wire format mirrors the Go backend. Renaming a field, adding an endpoint, or
 
 ## 6. Releases
 
-Semver `v0.Y.Z` tags from `main`; release notes from `git log` between tags. `npm publish --access public` (once un-private) only by the tech lead; `dist/` is built fresh in CI, never committed. Update the README compatibility table with the backend tag used for verification.
+Semver `v0.Y.Z` tags from `main`; release notes from `git log` between tags. Publishing runs from
+the protected `npm` environment using npm trusted publishing (OIDC), so no long-lived npm token is
+stored here. Only the tech lead pushes a release tag; `dist/` is built fresh in CI, never committed.
+Update the README compatibility table with the backend tag used for verification and confirm the
+provenance badge on npm after publication.
